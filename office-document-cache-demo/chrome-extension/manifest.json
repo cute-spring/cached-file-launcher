@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "缓存文档打开助手（本地 Demo）",
+  "version": "1.0.0",
+  "description": "仅在本地 Demo 页面上，打开 Chrome 下载记录中已经完成的 DOCX、XLSX 或 PDF 文件。",
+  "permissions": ["downloads", "downloads.open"],
+  "host_permissions": ["http://localhost:8080/*", "http://127.0.0.1:8080/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["http://localhost:8080/index.html", "http://127.0.0.1:8080/index.html"],
+    "js": ["content.js"],
+    "run_at": "document_start"
+  }]
+}

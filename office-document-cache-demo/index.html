@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>文档本地缓存下载器</title>
+  <style>
+    :root { --ink:#172033; --muted:#637087; --line:#dce3ee; --panel:#fff; --page:#f4f7fb; --brand:#2457d6; --brand-dark:#173b98; --ok:#137a4a; --warn:#a15c00; --danger:#bd2b3c; --shadow:0 12px 30px rgba(34,57,96,.08); }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:var(--page); }
+    .shell { width:min(1120px,calc(100% - 32px)); margin:38px auto 64px; }
+    .hero,.card { background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); }
+    .hero { padding:30px 32px; background:linear-gradient(120deg,#fff 42%,#eef4ff); }
+    h1 { margin:0 0 8px; font-size:28px; line-height:1.25; letter-spacing:-.02em; }
+    h2 { font-size:18px; margin:0; }
+    p { color:var(--muted); margin:0; }
+    .statusbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:20px; }
+    .pill { display:inline-flex; align-items:center; gap:7px; border:1px solid #c9d6ef; color:#254275; background:#f7faff; padding:5px 10px; border-radius:999px; font-size:13px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:#7c8aa4; }.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--danger)}
+    .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin:22px 0 14px; }
+    .toolbar-actions,.actions { display:flex; flex-wrap:wrap; gap:8px; }
+    button { appearance:none; cursor:pointer; border:1px solid #b7c5df; border-radius:8px; color:#23395d; background:#fff; padding:8px 12px; font:inherit; font-weight:600; transition:.15s ease; }
+    button:hover:not(:disabled) { border-color:var(--brand); color:var(--brand); background:#f7faff; } button:disabled { cursor:not-allowed; opacity:.5; }
+    button.primary { color:#fff; background:var(--brand); border-color:var(--brand); } button.primary:hover:not(:disabled) { background:var(--brand-dark); color:#fff; } button.danger { color:var(--danger); border-color:#efbdc4; }
+    .notice { display:none; margin:14px 0; padding:11px 13px; border-radius:8px; border:1px solid #c9d6ef; background:#f7faff; color:#294570; }.notice.show{display:block}.notice.success{border-color:#b8e4ce;background:#f0fbf5;color:#11613a}.notice.error{border-color:#f0c2c8;background:#fff5f6;color:#9b1d2d}
+    .permission-card { margin-top:16px; padding:16px 20px; border:1px solid #efcf92; border-radius:12px; background:#fff9ee; }
+    .permission-card.active { border-color:#b8e4ce; background:#f0fbf5; }
+    .permission-card h2 { font-size:16px; margin-bottom:5px; }
+    .permission-card p { color:#65543d; }.permission-card.active p { color:#3d6752; }
+    .permission-card details { margin-top:10px; }.permission-card summary { cursor:pointer; font-weight:600; color:#23467c; }
+    .permission-card ol { margin:8px 0 0; padding-left:22px; }.permission-card li { margin-top:4px; }
+    .file-list { display:grid; gap:12px; }.file { background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:18px 20px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; align-items:center; }.file h3 { font-size:16px; margin:0 0 4px; }.meta { color:var(--muted); font-size:13px; word-break:break-all; }.type { display:inline-block; color:#315394; background:#ebf2ff; border-radius:5px; padding:1px 7px; margin-right:7px; text-transform:uppercase; font-weight:700; font-size:12px; }.state { margin-top:9px; font-size:13px; font-weight:600; }.state.cached{color:var(--ok)}.state.working{color:var(--warn)}.state.failed{color:var(--danger)}.state.missing{color:var(--muted)}
+    .progress { width:100%; height:5px; overflow:hidden; border-radius:99px; margin-top:8px; background:#e8edf5; }.progress span{display:block; width:0; height:100%; background:var(--brand); transition:width .2s; }.progress.indeterminate span{width:35%; animation:move 1.1s infinite ease-in-out;}@keyframes move{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
+    .footnote { margin-top:18px; color:var(--muted); font-size:12px; }.empty { padding:24px; color:var(--muted); text-align:center; }
+    @media (max-width:720px){.shell{width:min(100% - 20px,1120px);margin-top:14px}.hero{padding:22px}.file{grid-template-columns:1fr}.actions button{flex:1 1 auto}.toolbar{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero" aria-labelledby="page-title">
+      <h1 id="page-title">文档本地缓存下载器</h1>
+      <p>首次从既有下载 API 获取并缓存原始二进制响应；后续下载优先由 Service Worker 从当前浏览器的 Cache Storage 返回。</p>
+      <div class="statusbar"><span class="pill"><i id="sw-dot" class="dot"></i><span id="sw-status">Service Worker 初始化中…</span></span><span class="pill" id="storage-status">正在读取本地缓存状态…</span></div>
+    </section>
+
+    <section id="open-helper-card" class="permission-card" aria-labelledby="open-helper-title">
+      <h2 id="open-helper-title">打开已有下载文件：需要浏览器扩展授权</h2>
+      <p id="open-helper-state" role="status" aria-live="polite">正在检查扩展状态…</p>
+      <p>“预缓存”只写入浏览器缓存；要打开下载目录中的原文件，请先点击该文件的“下载”。下载和预缓存本身无需扩展。</p>
+      <details id="open-setup">
+        <summary>查看启用步骤和权限用途</summary>
+        <ol>
+          <li>在 Chrome / Edge 的扩展管理页面开启开发者模式，选择“加载已解压的扩展程序”，选中工程内的 <code>chrome-extension/</code> 文件夹。</li>
+          <li>查看并同意扩展请求的 <code>downloads</code>（查询下载记录）与 <code>downloads.open</code>（打开已完成的下载项）权限；页面无法代替浏览器授权。</li>
+          <li>刷新本页面，确认显示“已检测到扩展”；先完成一次“下载”，再点击“打开”。能否启动 Word / WPS / Excel 仍取决于系统文件关联与浏览器策略。</li>
+        </ol>
+      </details>
+    </section>
+
+    <div class="toolbar">
+      <h2>可下载文件</h2>
+      <div class="toolbar-actions">
+        <button class="primary" id="precache-all">预缓存全部文件</button>
+        <button id="refresh-status">刷新页面状态</button>
+        <button class="danger" id="clear-all">清空全部本地缓存</button>
+      </div>
+    </div>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <section id="file-list" class="file-list" aria-live="polite"></section>
+    <p class="footnote">缓存仅存在于当前浏览器 Profile 的站点沙盒。文件下载后的打开行为由浏览器设置、企业策略和操作系统默认关联决定。</p>
+  </main>
+
+  <script>
+    /* ===== 配置区：替换为系统中已存在的下载 API；不要在此 Demo 中新增 API。 ===== */
+    const OFFICE_FILES = [
+      { id: "policy-001", title: "客户服务操作指引", url: "/existing-download-api/files/policy-001", expectedFileName: "customer-service-guide.docx", type: "docx", expectedMimeTypes: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"] },
+      { id: "form-002", title: "服务记录模板", url: "/existing-download-api/files/form-002", expectedFileName: "service-record-template.xlsx", type: "xlsx", expectedMimeTypes: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"] },
+      { id: "notice-003", title: "合规通知范本", url: "/existing-download-api/files/notice-003", expectedFileName: "compliance-notice.docx", type: "docx", expectedMimeTypes: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"] },
+      { id: "guide-004", title: "缓存使用说明", url: "/existing-download-api/files/guide-004", expectedFileName: "cache-usage-guide.pdf", type: "pdf", expectedMimeTypes: ["application/pdf"] }
+    ];
+    // 与 sw.js 中的 API 路径白名单保持一致。无 ETag / Last-Modified 时，SW 使用此 TTL 作为更新检查降级策略。
+    const FALLBACK_REVALIDATE_TTL_MS = 15 * 60 * 1000;
+
+    const byId = (id) => document.getElementById(id);
+    const state = new Map(OFFICE_FILES.map((file) => [file.id, { cache: "unknown", message: "正在查询…", progress: null }]));
+    let registration = null;
+    let cacheAvailable = "serviceWorker" in navigator && "caches" in window;
+
+    function safeApiLabel(rawUrl) {
+      try { const url = new URL(rawUrl, location.href); return url.origin === location.origin ? url.pathname : `${url.origin}${url.pathname}`; }
+      catch { return "（无效 API 地址）"; }
+    }
+    function setNotice(message, kind = "info") {
+      const node = byId("notice"); node.textContent = message; node.className = `notice show ${kind === "info" ? "" : kind}`;
+    }
+    function clearNotice() { byId("notice").className = "notice"; }
+    function setSwStatus(text, kind = "") {
+      byId("sw-status").textContent = text; byId("sw-dot").className = `dot ${kind}`;
+    }
+    function updateOpenHelperStatus() {
+      const ready = document.documentElement.dataset.officeOpenHelper === "ready";
+      byId("open-helper-card").classList.toggle("active", ready);
+      byId("open-helper-state").textContent = ready
+        ? "已检测到扩展。请先完成一次下载，再点击“打开”使用已有文件。"
+        : "未检测到扩展：当前“打开”按钮无法启动本机文件。请按下方步骤启用并授权。";
+    }
+    document.addEventListener("office-open-helper-ready", updateOpenHelperStatus);
+    updateOpenHelperStatus();
+    function setFileState(id, patch) { state.set(id, { ...state.get(id), ...patch }); renderFiles(); }
+    function fileById(id) { return OFFICE_FILES.find((file) => file.id === id); }
+
+    function renderFiles() {
+      const list = byId("file-list");
+      list.innerHTML = OFFICE_FILES.map((file) => {
+        const item = state.get(file.id); const label = item.message || "未缓存";
+        const className = item.cache === "cached" ? "cached" : item.cache === "failed" ? "failed" : item.cache === "working" ? "working" : "missing";
+        const progress = item.progress === null ? "" : `<div class="progress ${item.progress.indeterminate ? "indeterminate" : ""}"><span style="width:${item.progress.percent || 0}%"></span></div>`;
+        return `<article class="file" data-file-id="${file.id}"><div><h3>${escapeHtml(file.title)}</h3><div class="meta"><span class="type">${escapeHtml(file.type)}</span>${escapeHtml(safeApiLabel(file.url))}</div><div class="state ${className}">${escapeHtml(label)}</div>${progress}</div><div class="actions"><button class="primary" data-action="download" data-id="${file.id}">下载</button><button data-action="open" data-id="${file.id}">打开</button><button data-action="precache" data-id="${file.id}">预缓存</button><button data-action="check" data-id="${file.id}">检查更新</button><button data-action="refresh" data-id="${file.id}">刷新缓存</button></div></article>`;
+      }).join("");
+    }
+    function escapeHtml(value) { const span = document.createElement("span"); span.textContent = String(value); return span.innerHTML; }
+
+    function waitForController(timeoutMs = 2500) {
+      if (navigator.serviceWorker.controller) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => { navigator.serviceWorker.removeEventListener("controllerchange", done); resolve(Boolean(navigator.serviceWorker.controller)); }, timeoutMs);
+        function done() { clearTimeout(timer); navigator.serviceWorker.removeEventListener("controllerchange", done); resolve(true); }
+        navigator.serviceWorker.addEventListener("controllerchange", done);
+      });
+    }
+    async function ensureWorker() {
+      if (!cacheAvailable) return null;
+      try {
+        registration ||= await navigator.serviceWorker.register("./sw.js");
+        await navigator.serviceWorker.ready;
+        await waitForController();
+        return navigator.serviceWorker.controller || registration.active || null;
+      } catch (error) {
+        cacheAvailable = false; setSwStatus("Service Worker 注册失败，已使用普通下载模式", "bad");
+        setNotice(`本地缓存不可用：${error.message || error}`, "error"); return null;
+      }
+    }
+    async function callWorker(type, payload = {}) {
+      const worker = await ensureWorker();
+      if (!worker) throw new Error("本地缓存不可用，无法执行缓存操作。");
+      return new Promise((resolve, reject) => {
+        const channel = new MessageChannel();
+        const timeout = setTimeout(() => reject(new Error("Service Worker 响应超时。")), 30000);
+        channel.port1.onmessage = ({ data }) => { clearTimeout(timeout); data && data.ok ? resolve(data) : reject(new Error(data?.error || "缓存操作失败。")); };
+        worker.postMessage({ type, ...payload }, [channel.port2]);
+      });
+    }
+    async function refreshStatuses() {
+      if (!cacheAvailable) { updateStorageLabel(0, OFFICE_FILES.length); renderFiles(); return; }
+      try {
+        const result = await callWorker("GET_CACHE_STATUS", { files: OFFICE_FILES });
+        for (const row of result.files) setFileState(row.id, { cache: row.cached ? "cached" : "missing", message: row.cached ? `已缓存${row.cachedAt ? `（${new Date(row.cachedAt).toLocaleString()}）` : ""}` : "未缓存", progress: null });
+        updateStorageLabel(result.files.filter((row) => row.cached).length, OFFICE_FILES.length);
+      } catch (error) { setNotice(`无法读取缓存状态：${error.message}`, "error"); }
+    }
+    function updateStorageLabel(cached, total) { byId("storage-status").textContent = cacheAvailable ? `本地缓存：${cached}/${total} 个文件` : "本地缓存不可用"; }
+
+    function normalDownload(file) {
+      // 不设置 HTML download 属性：Chromium 可能让该属性触发的下载绕过 Service Worker。
+      // 由既有 API 的 Content-Disposition: attachment 保持原始文件名并触发附件下载。
+      const link = document.createElement("a"); link.href = file.url; link.hidden = true; link.rel = "noopener";
+      document.body.appendChild(link); link.click(); setTimeout(() => link.remove(), 0);
+    }
+    async function cacheFile(file, messageType = "PRECACHE") {
+      setFileState(file.id, { cache: "working", message: "正在下载并缓存…", progress: { indeterminate: true, percent: 0 } });
+      const result = await callWorker(messageType, { file, fallbackTtlMs: FALLBACK_REVALIDATE_TTL_MS });
+      setFileState(file.id, { cache: "cached", message: result.message || "已缓存", progress: null });
+      return result;
+    }
+    async function deliverFile(file, action) {
+      clearNotice();
+      try {
+        const status = await callWorker("GET_CACHE_STATUS", { files: [file] });
+        if (!status.files[0]?.cached) await cacheFile(file);
+        else {
+          setFileState(file.id, { cache: "cached", message: "已缓存，正在触发下载…", progress: null });
+          callWorker("CHECK_UPDATE", { file, fallbackTtlMs: FALLBACK_REVALIDATE_TTL_MS }).catch(() => {});
+        }
+        normalDownload(file);
+        setFileState(file.id, { cache: "cached", message: `已缓存；已请求浏览器${action}`, progress: null });
+        setNotice(action === "打开"
+          ? "已请求浏览器以附件方式打开/下载。是否自动用对应的本机应用打开，由浏览器、企业策略和操作系统默认关联决定。"
+          : "已发起附件下载。是否自动打开对应的本机应用由浏览器、企业策略和操作系统决定。", "success");
+      } catch (error) {
+        // 即使本地缓存失败，用户本次点击仍可尝试走既有 API 的普通下载路径。
+        normalDownload(file); setFileState(file.id, { cache: "failed", message: `缓存失败：${error.message}`, progress: null });
+        setNotice(`本地缓存失败，已尝试普通${action}：${error.message}`, "error");
+      }
+    }
+    const onDownload = (file) => deliverFile(file, "下载");
+    async function onOpen(file) {
+      clearNotice();
+      byId("open-setup").open = true;
+      try {
+        const result = await callWorker("GET_CACHE_STATUS", { files: [file] });
+        const cached = Boolean(result.files[0]?.cached);
+        setFileState(file.id, { cache: cached ? "cached" : "missing", message: cached ? "已缓存；浏览器无法直接启动本机 Office" : "未缓存", progress: null });
+        setNotice(cached
+          ? "已缓存，但尚未检测到打开助手。请先完成一次“下载”，再按上方步骤启用并授权扩展；也可从浏览器下载记录手动打开已有文件。"
+          : "请先点击“下载”，并按上方步骤启用浏览器扩展。预缓存不会在下载目录生成可打开的文件。", "error");
+      } catch (error) {
+        setNotice(`无法确认本地缓存状态：${error.message}`, "error");
+      }
+    }
+    async function onCheck(file) {
+      clearNotice(); setFileState(file.id, { cache: "working", message: "正在检查更新…", progress: null });
+      try { const result = await callWorker("CHECK_UPDATE", { file, fallbackTtlMs: FALLBACK_REVALIDATE_TTL_MS }); setFileState(file.id, { cache: result.cached ? "cached" : "missing", message: result.message, progress: null }); setNotice(result.message, "success"); await refreshStatuses(); }
+      catch (error) { setFileState(file.id, { cache: "failed", message: `检查失败，继续使用本地版本：${error.message}`, progress: null }); setNotice(`检查更新失败：${error.message}`, "error"); }
+    }
+    async function onRefresh(file) {
+      clearNotice();
+      try { await cacheFile(file, "REFRESH_CACHE"); setNotice("已重新获取并替换本地缓存。", "success"); await refreshStatuses(); }
+      catch (error) { setFileState(file.id, { cache: "failed", message: `刷新失败：${error.message}`, progress: null }); setNotice(`刷新缓存失败：${error.message}`, "error"); }
+    }
+
+    document.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]"); if (!button) return;
+      const file = fileById(button.dataset.id); if (!file) return;
+      button.disabled = true;
+      try { if (button.dataset.action === "download") await onDownload(file); else if (button.dataset.action === "open") await onOpen(file); else if (button.dataset.action === "precache") { await cacheFile(file); setNotice("文件已预缓存，尚未写入常规下载目录。", "success"); await refreshStatuses(); } else if (button.dataset.action === "check") await onCheck(file); else if (button.dataset.action === "refresh") await onRefresh(file); }
+      finally { button.disabled = false; }
+    });
+    byId("precache-all").addEventListener("click", async (event) => {
+      event.currentTarget.disabled = true; clearNotice();
+      try { const result = await callWorker("PRECACHE_ALL", { files: OFFICE_FILES, fallbackTtlMs: FALLBACK_REVALIDATE_TTL_MS }); setNotice(`预缓存完成：成功 ${result.successCount} 个，失败 ${result.failureCount} 个。`, result.failureCount ? "error" : "success"); await refreshStatuses(); }
+      catch (error) { setNotice(`预缓存全部文件失败：${error.message}`, "error"); }
+      finally { event.currentTarget.disabled = false; }
+    });
+    byId("refresh-status").addEventListener("click", refreshStatuses);
+    byId("clear-all").addEventListener("click", async () => {
+      if (!confirm("确认清空当前浏览器中本 Demo 的全部文档缓存吗？此操作不会删除您电脑下载目录中的文件。")) return;
+      try { await callWorker("CLEAR_CACHE"); for (const file of OFFICE_FILES) setFileState(file.id, { cache: "missing", message: "未缓存", progress: null }); updateStorageLabel(0, OFFICE_FILES.length); setNotice("已清空全部本地缓存。", "success"); }
+      catch (error) { setNotice(`清空缓存失败：${error.message}`, "error"); }
+    });
+    navigator.serviceWorker?.addEventListener("message", ({ data }) => {
+      if (!data?.type || !data.fileId) return;
+      if (data.type === "CACHE_PROGRESS") setFileState(data.fileId, { cache: "working", message: data.total ? `正在下载并缓存… ${data.percent}%` : "正在下载并缓存…", progress: { indeterminate: !data.total, percent: data.percent || 0 } });
+      if (data.type === "CACHE_UPDATED") setFileState(data.fileId, { cache: "cached", message: "发现新版本并已更新", progress: null });
+      if (data.type === "CACHE_ERROR") setFileState(data.fileId, { cache: "failed", message: `预缓存失败：${data.error}`, progress: null });
+    });
+
+    (async () => {
+      renderFiles();
+      if (!cacheAvailable) { setSwStatus("当前浏览器不支持本地缓存，已使用普通下载模式", "warn"); updateStorageLabel(0, OFFICE_FILES.length); return; }
+      const worker = await ensureWorker();
+      if (worker) { setSwStatus(navigator.serviceWorker.controller ? "Service Worker 已启用" : "Service Worker 已启用；首次接管可能需要刷新一次页面", "ok"); await refreshStatuses(); }
+    })();
+  </script>
+</body>
+</html>
